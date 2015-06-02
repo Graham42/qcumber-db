@@ -1,0 +1,3 @@
+CREATE DATABASE qcumberdb;
+CREATE USER qcumber;
+GRANT ALL PRIVILEGES ON DATABASE qcumberdb TO qcumber;
