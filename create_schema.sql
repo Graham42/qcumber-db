@@ -1,16 +1,30 @@
 BEGIN TRANSACTION;
 
+DROP SCHEMA IF EXISTS queens CASCADE;
 CREATE SCHEMA queens;
 
+-- In the future may want to separate type creation from the queens schema
+DROP TYPE IF EXISTS season;
 CREATE TYPE season as ENUM ('winter', 'spring', 'summer', 'fall');
--- ISO ordering 1..7  TODO check if can easily cast to/from int
-CREATE TYPE week_day as ENUM ('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY');
 
-CREATE TABLE queens.instructors (
-    id      serial PRIMARY KEY,
-    name    varchar NOT NULL,
-    email   varchar
+DROP TABLE IF EXISTS public.iso_week_day;
+DROP TYPE IF EXISTS week_day;
+-- enums make the data more meaningful to look at instead of having to remember that 1 is Monday etc
+CREATE TYPE week_day as ENUM ('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY');
+CREATE TABLE public.iso_week_day (
+    iso_dow     integer,
+    week_day    week_day,
+    PRIMARY KEY (iso_dow, week_day)
 );
+INSERT INTO public.iso_week_day VALUES
+(1, 'MONDAY'),
+(2, 'TUESDAY'),
+(3, 'WEDNESDAY'),
+(4, 'THURSDAY'),
+(5, 'FRIDAY'),
+(6, 'SATURDAY'),
+(7, 'SUNDAY');
+
 
 CREATE TABLE queens.subjects (
     id              serial PRIMARY KEY,
@@ -113,6 +127,12 @@ CREATE TABLE queens.section_classes (
     location        varchar
 );
 
+CREATE TABLE queens.instructors (
+    id      serial PRIMARY KEY,
+    name    varchar NOT NULL,
+    email   varchar
+);
+
 CREATE TABLE queens.section_class_instructors (
     section_class_id    bigint REFERENCES queens.section_classes(id) ON UPDATE CASCADE ON DELETE CASCADE,
     instructor_id       integer REFERENCES queens.instructors(id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -139,5 +159,16 @@ CREATE TABLE queens.course_textbooks (
     required    boolean,
     PRIMARY KEY (textbook_id, course_id)
 );
+-- on delete, trigger copy textbook to historical, TODO check if ON DELETE needs to restrict to get the data from other tables
 
+
+-- Historical data ideas
+-- course instructors - who, when
+-- text books - title, when
+-- when a course was last offered
+-- when data was last loaded, be able to show more relevance for courses no longer available
+
+-- Views
+-- what courses instructors are currently teaching
+-- what courses instructors have taught in the past
 COMMIT;
