@@ -41,7 +41,7 @@ CREATE TABLE queens.courses (
     description         text,
     career              varchar,
     grading_basis       varchar,
-    units               numeric(2),
+    units               real,
     -- TODO this should be parsed and the data put in the relevant tables
     enrollment_req      text,
     add_consent         varchar,
@@ -149,7 +149,7 @@ CREATE TABLE queens.textbooks (
 CREATE TABLE queens.textbooks_bookstore (
     textbook_id     integer PRIMARY KEY REFERENCES queens.textbooks(id) ON UPDATE CASCADE ON DELETE CASCADE,
     url             varchar,
-    price           numeric(2),
+    price           real,
     available_new   integer
 );
 
@@ -161,6 +161,9 @@ CREATE TABLE queens.course_textbooks (
 );
 -- on delete, trigger copy textbook to historical, TODO check if ON DELETE needs to restrict to get the data from other tables
 
+-- More data
+-- timeslots, sections in timeslots
+-- degree plans
 
 -- Historical data ideas
 -- course instructors - who, when
