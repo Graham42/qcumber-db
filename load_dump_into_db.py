@@ -67,12 +67,13 @@ fields = {
         'extra.CEAB.Math': 'mathematics',
     },
     'course_components': {}, # array so special case
+# TODO fix switched properties
     'sections': {
-        'basic.solus_id': 'solus_id',
-        'basic.course': 'course.num',
-        'basic.subject': 'course.abbr',
+        'basic.solus_id': 'class_num', #'solus_id',
+        'basic.course': 'course_num__REF__course_id',
+        'basic.subject': 'subject_abbr__NOCOLUMN',
         'basic.type': 'type',
-        'basic.class_num': 'class_num',
+        'basic.class_num': 'solus_id', #'class_num',
         'basic.year': 'year',
         'basic.season': 'season',
         'details.session': 'session',
@@ -102,18 +103,25 @@ fields = {
 }
 
 unused_data = {'subjects': [], 'courses': [], 'sections': [], 'textbooks': []}
-ids = {'subjects': [], 'courses': [], 'sections': [], 'textbooks': []}
+ids = {'subjects': {}, 'courses': {}, 'sections': {}, 'textbooks': {}, 'instructors': {}}
 
 
 conn = psycopg2.connect(dbname="qcumberdb", host="localhost", user="postgres", password="Default1$")
 conn.set_session(autocommit=True)
 cur = conn.cursor()
 
+cur.execute("SELECT * FROM public.iso_week_day")
+ISO_WEEK_DAYS = {d[0]: d[1] for d in cur.fetchall()}
+if len(ISO_WEEK_DAYS.keys()) != 7:
+    print("Missing day of week data")
+    exit(1)
+
 for s in yaml_data_files('subjects'):
     with open(s, 'r') as f:
         contents = f.read()
         obj = yaml.load(contents)
         subject = pop_fields(obj, fields['subjects'])
+        obj.pop('_unique', None)
         # someday in postgres 9.5+ use UPSERT
         try:
             cur.execute("""
@@ -133,7 +141,10 @@ print("Finished subjects...")
 
 columns = {}
 for thing in fields:
-    columns[thing] = sorted([re.sub(r'.*__REF__', "", col) for col in fields[thing].values()])
+    columns[thing] = sorted([re.sub(r'.*__REF__', "", col) for col in fields[thing].values() if col.find("__NOCOLUMN") == -1])
+columns['section_availability'].append('section_id')
+columns['section_classes'].append('section_id')
+
 queries = {
     'insert_course': """
         INSERT INTO queens.courses ({0})
@@ -157,13 +168,53 @@ queries = {
             ", ".join(columns['ceab_credits']),
             ", ".join(["%({0})s".format(x) for x in columns['ceab_credits']])
         ),
-
     'update_ceab': """
         UPDATE queens.ceab_credits
         SET {0}
         WHERE course_id = %(course_id)s
         """.format(
             ", ".join(["{0} = %({0})s".format(x) for x in columns['ceab_credits']])
+        ),
+
+    'insert_section': """
+        INSERT INTO queens.sections({0})
+        VALUES ({1});
+        """.format(
+            ", ".join(columns['sections']),
+            ", ".join(["%({0})s".format(x) for x in columns['sections'] if x.find('__NOCOLUMN') == -1])
+        ),
+    'update_section': """
+        UPDATE queens.sections
+        SET {0}
+        WHERE
+            course_id = %(course_id)s
+            AND class_num = %(class_num)s
+        """.format(
+            ", ".join(["{0} = %({0})s".format(x) for x in columns['sections'] if x.find('__NOCOLUMN') == -1])
+        ),
+
+    'insert_availability': """
+        INSERT INTO queens.section_availability({0})
+        VALUES ({1});
+        """.format(
+            ", ".join(columns['section_availability']),
+            ", ".join(["%({0})s".format(x) for x in columns['section_availability']])
+        ),
+    'update_availability': """
+        UPDATE queens.section_availability
+        SET {0}
+        WHERE section_id = %(section_id)s
+        """.format(
+            ", ".join(["{0} = %({0})s".format(x) for x in columns['section_availability']])
+        ),
+
+    'insert_class': """
+        INSERT INTO queens.section_classes({0})
+        VALUES ({1})
+        RETURNING id;
+        """.format(
+            ", ".join(columns['section_classes']),
+            ", ".join(["%({0})s".format(x) for x in columns['section_classes']])
         ),
 }
 
@@ -172,6 +223,7 @@ for c in yaml_data_files('courses'):
         contents = f.read()
         obj = yaml.load(contents)
 
+        obj.pop('_unique', None)
         course = pop_fields(obj, fields['courses'])
         # get subject id by abbrev
         course['subject_id'] = ids['subjects'][course['subject_abbr']]
@@ -189,6 +241,7 @@ for c in yaml_data_files('courses'):
         cur.execute("""SELECT id FROM queens.courses
             WHERE subject_id = %(subject_id)s AND number = %(number)s""", course)
         course_id = cur.fetchone()[0]
+        ids['courses']["{0} {1}".format(course['subject_abbr'],course['number'])] = course_id
 
         # season a course is usually offered in (Winter, Fall...)
         cur.execute("""
@@ -200,14 +253,14 @@ for c in yaml_data_files('courses'):
             for season in offered['typically_offered'].split(','):
                 cur.execute("""
                     INSERT INTO queens.course_typically_offered (course_id, term)
-                    VALUES (%s, %s);""", (course_id, season.strip().lower()))
+                    VALUES (%s, %s);""", (course_id, season.strip()))
 
         # components are things like Lecture, Tutorial, Lab
         cur.execute("""
             DELETE FROM queens.course_components
             WHERE course_id = %(course_id)s;
             """, {'course_id': course_id})
-        components = obj.pop('course_components', {})
+        components = obj['extra'].pop('course_components', {})
         for key, value in components.items():
             # not sure the possible values for this, right now the db has it as a boolean
             # but may not be binary
@@ -230,19 +283,109 @@ for c in yaml_data_files('courses'):
             unused_data['courses'].append(obj)
 print("Finished courses...")
 
+cur.execute("SELECT abbreviation, number, c.id FROM queens.subjects s JOIN queens.courses c ON (s.id = c.subject_id)")
+ids['courses'] = {"{0} {1}".format(m[0], m[1]): m[2] for m in cur.fetchall()}
 
-# TODO sections
-#for s in yaml_data_files('sections'):
-#    with open(s, 'r') as f:
-#        contents = f.read()
-#        obj = yaml.load(contents)
-#        data['sections'].append(pop_fields(obj, fields['sections']))
-## get course id by subject abbrev and course num
-#        if len(obj.keys()) > 1:
-#            unused_data['sections'].append(obj)
+for s in yaml_data_files('sections'):
+    with open(s, 'r') as f:
+        contents = f.read()
+        obj = yaml.load(contents)
+
+        obj.pop('_unique', None)
+        section = pop_fields(obj, fields['sections'])
+        # get course id by subject abbrev and course num
+        course_str = "{0} {1}".format(section['subject_abbr'],section['course_num'])
+        section['course_id'] = ids['courses'][course_str]
+        # write / update the section
+        try:
+            cur.execute(queries['insert_section'], section)
+        except psycopg2.IntegrityError:
+            cur.execute(queries['update_section'], section)
+
+        # get the section id for referential tables
+        cur.execute("""SELECT id FROM queens.sections
+            WHERE course_id = %(course_id)s AND class_num = %(class_num)s""", section)
+        try:
+            section_id = cur.fetchone()[0]
+        except Exception as e:
+            print(section)
+            raise e
+
+        # section availability
+        available = pop_fields(obj, fields['section_availability'])
+        available['section_id'] = section_id
+        try:
+            cur.execute(queries['insert_availability'], available)
+        except psycopg2.IntegrityError:
+            cur.execute(queries['update_availability'], available)
+
+        cur.execute("""
+            DELETE FROM queens.section_classes
+            WHERE section_id = %s
+            """, (section_id,))
+        for cl in obj['classes']:
+            clz = pop_fields(cl, fields['section_classes'])
+            clz['section_id'] = section_id
+            if clz['day_of_week'] is not None:
+                clz['day_of_week'] = ISO_WEEK_DAYS[clz['day_of_week']]
+            try:
+                cur.execute(queries['insert_class'], clz)
+            except psycopg2.IntegrityError as e:
+                print(section)
+                raise e
+            clz_id = cur.fetchone()[0]
+
+            cur.execute("""
+                DELETE FROM queens.section_class_instructors
+                WHERE section_class_id = %s
+                """, (clz_id,))
+            for name in cl.pop('instructors', []):
+                # add the instructor if not there yet
+                if name not in ids['instructors']:
+                    try:
+                        cur.execute("INSERT INTO queens.instructors (name) VALUES (%s)", (name,))
+                    except psycopg2.IntegrityError:
+                        pass
+                    cur.execute("SELECT id FROM queens.instructors where name = %s", (name,))
+                    ids['instructors'][name] = cur.fetchone()[0]
+                # add reference from class to instructor
+                cur.execute("""
+                    INSERT INTO queens.section_class_instructors VALUES (%s, %s)
+                    """, (clz_id, ids['instructors'][name]))
+
+        obj['classes'] = [x for x in obj['classes'] if x != {}]
+        if len(obj['classes']) == 0:
+            obj.pop('classes', None)
+
+        if len(obj.keys()) > 1:
+            unused_data['sections'].append(obj)
+print("Finished sections...")
 
 
-#print(unused_data)
+#TODO textbooks data
+
+
+# sanity check to see if we missed any data
+def report_unused(obj):
+    try:
+        obj.keys()
+    except:
+        return obj
+    if len(obj.keys()) == 0:
+        return None
+    else:
+        obj = {key: report_unused(obj[key]) for key in obj.keys()}
+        obj = {key: obj[key] for key in obj.keys() if obj[key] is not None}
+        if len(obj.keys()) == 0:
+            return None
+        else:
+            return obj
+
+for category in unused_data.keys():
+    unused_data[category] = [report_unused(x) for x in unused_data[category]]
+    unused_data[category] = [x for x in unused_data[category] if x is not None]
+print(report_unused(unused_data))
+
 
 cur.close()
 conn.close()

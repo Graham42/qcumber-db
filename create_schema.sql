@@ -5,7 +5,7 @@ CREATE SCHEMA queens;
 
 -- In the future may want to separate type creation from the queens schema
 DROP TYPE IF EXISTS season;
-CREATE TYPE season as ENUM ('winter', 'spring', 'summer', 'fall');
+CREATE TYPE season as ENUM ('Winter', 'Spring', 'Summer', 'Fall');
 
 DROP TABLE IF EXISTS public.iso_week_day;
 DROP TYPE IF EXISTS week_day;
@@ -87,10 +87,11 @@ CREATE TABLE queens.ceab_credits (
 );
 
 CREATE TABLE queens.course_components (
-    course_id   integer PRIMARY KEY REFERENCES queens.courses(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    course_id   integer REFERENCES queens.courses(id) ON UPDATE CASCADE ON DELETE CASCADE,
     -- laboratory, lecture...
     type        varchar NOT NULL,
-    required    boolean NOT NULL
+    required    boolean NOT NULL,
+    PRIMARY KEY (course_id, type)
 );
 
 CREATE TABLE queens.sections (
@@ -124,7 +125,8 @@ CREATE TABLE queens.section_classes (
     end_time        time,
     term_start      date,
     term_end        date,
-    location        varchar
+    location        varchar,
+    UNIQUE (section_id, location, term_start, day_of_week, start_time)
 );
 
 CREATE TABLE queens.instructors (
