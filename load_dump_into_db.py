@@ -127,7 +127,9 @@ for s in yaml_data_files('subjects'):
             cur.execute("""
                 INSERT INTO queens.subjects (abbreviation, title)
                 VALUES (%(abbreviation)s, %(title)s);""", subject)
-        except psycopg2.IntegrityError:
+        except psycopg2.IntegrityError as e:
+            if e.pgerror.find('uk_qsubjects_id') == -1:
+                raise e
             cur.execute("""
                 UPDATE queens.subjects
                 SET title = %(title)s
@@ -219,6 +221,7 @@ queries = {
 }
 
 for c in yaml_data_files('courses'):
+    #break
     with open(c, 'r') as f:
         contents = f.read()
         obj = yaml.load(contents)
@@ -231,7 +234,9 @@ for c in yaml_data_files('courses'):
         try:
             try:
                 cur.execute(queries['insert_course'], course)
-            except psycopg2.IntegrityError:
+            except psycopg2.IntegrityError as e:
+                if e.pgerror.find('uk_qcourses_id') == -1:
+                    raise e
                 cur.execute(queries['update_course'], course)
         except psycopg2.DataError as e:
             print(course)
@@ -297,9 +302,14 @@ for s in yaml_data_files('sections'):
         course_str = "{0} {1}".format(section['subject_abbr'],section['course_num'])
         section['course_id'] = ids['courses'][course_str]
         # write / update the section
+        cur.execute("""
+            UPDATE queens.sections SET solus_id = null
+            WHERE solus_id = %(solus_id)s""", section)
         try:
             cur.execute(queries['insert_section'], section)
-        except psycopg2.IntegrityError:
+        except psycopg2.IntegrityError as e:
+            if e.pgerror.find('uk_qsections_id') == -1:
+                raise e
             cur.execute(queries['update_section'], section)
 
         # get the section id for referential tables
@@ -332,6 +342,7 @@ for s in yaml_data_files('sections'):
                 cur.execute(queries['insert_class'], clz)
             except psycopg2.IntegrityError as e:
                 print(section)
+                print(clz)
                 raise e
             clz_id = cur.fetchone()[0]
 

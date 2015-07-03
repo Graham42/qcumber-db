@@ -31,7 +31,7 @@ CREATE TABLE queens.subjects (
     abbreviation    varchar NOT NULL,
     title           varchar
 );
-CREATE UNIQUE INDEX uk_qsubjects_a ON queens.subjects(abbreviation);
+CREATE UNIQUE INDEX uk_qsubjects_id ON queens.subjects(abbreviation);
 
 CREATE TABLE queens.courses (
     id                  serial PRIMARY KEY,
@@ -47,7 +47,7 @@ CREATE TABLE queens.courses (
     add_consent         varchar,
     drop_consent        varchar
 );
-CREATE UNIQUE INDEX uk_qcourses_a ON queens.courses(subject_id, number);
+CREATE UNIQUE INDEX uk_qcourses_id ON queens.courses(subject_id, number);
 
 CREATE TABLE queens.course_prereqs (
     course_id   integer REFERENCES queens.courses(id) ON UPDATE CASCADE ON DELETE CASCADE,
@@ -96,7 +96,7 @@ CREATE TABLE queens.course_components (
 
 CREATE TABLE queens.sections (
     id              bigserial PRIMARY KEY,
-    solus_id        integer UNIQUE,
+    solus_id        integer,
     course_id       integer REFERENCES queens.courses(id) ON UPDATE CASCADE ON DELETE CASCADE,
     type            varchar,
     class_num       varchar,
@@ -104,9 +104,10 @@ CREATE TABLE queens.sections (
     season          season,
     session         varchar,
     campus          varchar,
-    campus_location varchar,
-    UNIQUE (course_id, class_num)
+    campus_location varchar
 );
+CREATE UNIQUE INDEX uk_qsections_id ON queens.sections(course_id, class_num);
+CREATE UNIQUE INDEX uk_qsections_solus ON queens.sections(solus_id);
 
 CREATE TABLE queens.section_availability (
     section_id          bigint PRIMARY KEY REFERENCES queens.sections(id) ON UPDATE CASCADE ON DELETE CASCADE,
@@ -125,8 +126,7 @@ CREATE TABLE queens.section_classes (
     end_time        time,
     term_start      date,
     term_end        date,
-    location        varchar,
-    UNIQUE (section_id, location, term_start, day_of_week, start_time)
+    location        varchar
 );
 
 CREATE TABLE queens.instructors (
