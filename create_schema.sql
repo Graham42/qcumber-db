@@ -161,6 +161,11 @@ CREATE TABLE queens.course_textbooks (
     required    boolean,
     PRIMARY KEY (textbook_id, course_id)
 );
+COMMIT;
+
+-------------------------------------------------------------------------------
+-- Ideas
+
 -- on delete, trigger copy textbook to historical, TODO check if ON DELETE needs to restrict to get the data from other tables
 
 -- More data
@@ -176,4 +181,5 @@ CREATE TABLE queens.course_textbooks (
 -- Views
 -- what courses instructors are currently teaching
 -- what courses instructors have taught in the past
-COMMIT;
+
+

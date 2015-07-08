@@ -6,6 +6,7 @@ echo Creating db...
 gosu postgres postgres --single < /scripts/create_db.sql
 echo Creating schema...
 gosu postgres postgres --single qcumberdb -j < /scripts/create_schema.sql
+gosu postgres postgres --single qcumberdb -j < /scripts/create_views.sql
 if [ "$?" == 0 ]; then
     echo Sucess!
 else

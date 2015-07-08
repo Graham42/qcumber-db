@@ -57,7 +57,7 @@ fields = {
         'extra.drop_consent': 'drop_consent',
     },
     'course_typically_offered': {
-        'extra.typically_offered': 'typically_offered__SPLIT',
+        'extra.typically_offered': 'UNUSED',
     },
     'ceab_credits': {
         'extra.CEAB.Basic Sci': 'basic_science',
@@ -248,17 +248,8 @@ for c in yaml_data_files('courses'):
         course_id = cur.fetchone()[0]
         ids['courses']["{0} {1}".format(course['subject_abbr'],course['number'])] = course_id
 
-        # season a course is usually offered in (Winter, Fall...)
-        cur.execute("""
-            DELETE FROM queens.course_typically_offered
-            WHERE course_id = %(course_id)s;
-            """, {'course_id': course_id})
-        offered = pop_fields(obj, fields['course_typically_offered'])
-        if offered['typically_offered'] is not None:
-            for season in offered['typically_offered'].split(','):
-                cur.execute("""
-                    INSERT INTO queens.course_typically_offered (course_id, term)
-                    VALUES (%s, %s);""", (course_id, season.strip()))
+        # This data is unused, it's derived from what's actually offered instead
+        pop_fields(obj, fields['course_typically_offered'])
 
         # components are things like Lecture, Tutorial, Lab
         cur.execute("""
