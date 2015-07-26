@@ -97,9 +97,17 @@ fields = {
     },
     'instructors': {}, #special case
     'section_class_instructors': {}, #special case
-    'textbooks': {},
-    'textbooks_bookstore': {},
-    'course_textbooks': {},
+    'textbooks': {
+        'authors': 'authors',
+        'isbn_10': 'isbn_10',
+        'isbn_13': 'isbn_13',
+        'title': 'title',
+    },
+    'textbooks_bookstore': {
+        'listing_url': 'url',
+        'new_price': 'price',
+        'new_available': 'available_new',
+    },
 }
 
 unused_data = {'subjects': [], 'courses': [], 'sections': [], 'textbooks': []}
@@ -219,6 +227,21 @@ queries = {
             ", ".join(["%({0})s".format(x) for x in columns['section_classes']])
         ),
 }
+def insert(table_name, extra_cols=[], return_id=False):
+    cols = [x for x in columns[table_name] if x.find('__NOCOLUMN') == -1]
+    cols.extend(extra_cols)
+    kwargs = {
+        'table_name': table_name,
+        'columns': ', '.join(cols),
+        'val_placeholders': ', '.join(['%({0})s'.format(x) for x in cols])
+    }
+    q = """
+        INSERT INTO queens.{table_name}({columns})
+        VALUES ({val_placeholders})
+        """.format(**kwargs)
+    if return_id:
+        q += "RETURNING id;"
+    return q
 
 for c in yaml_data_files('courses'):
     #break
@@ -364,7 +387,48 @@ for s in yaml_data_files('sections'):
 print("Finished sections...")
 
 
-#TODO textbooks data
+cur.execute("DELETE FROM queens.textbooks")
+for s in yaml_data_files('textbooks'):
+    with open(s, 'r') as f:
+        contents = f.read()
+        try:
+            obj = yaml.load(contents)
+        except yaml.reader.ReaderError as e:
+            print(s)
+            print(contents)
+            raise e
+
+        obj.pop('_unique', None)
+        textbook = pop_fields(obj, fields['textbooks'])
+        if textbook['authors'] is not None:
+            if len(textbook['authors']) > 0 and len(textbook['authors'][0]) == 1:
+                textbook['authors'] = [textbook['authors']]
+        if textbook['isbn_10'] is not None and len(textbook['isbn_10']) > 10:
+            textbook['isbn_10'] = None
+        try:
+            cur.execute(insert('textbooks', [], True), textbook)
+        except psycopg2.DataError as e:
+            print(textbook)
+            raise e
+        t_id = cur.fetchone()
+
+        t_bkstr = pop_fields(obj, fields['textbooks_bookstore'])
+        t_bkstr['textbook_id'] = t_id
+        if t_bkstr['price'] is not None:
+            t_bkstr['price'] = t_bkstr['price'].replace('$', '')
+        cur.execute(insert('textbooks_bookstore', ['textbook_id']), t_bkstr)
+
+        for c in obj['courses']:
+            if c in ids['courses']:
+                try:
+                    cur.execute("""
+                        INSERT INTO queens.course_textbooks (textbook_id, course_id)
+                        VALUES (%(t_id)s, %(c_id)s)
+                        """, {'t_id': t_id, 'c_id': ids['courses'][c]})
+                except psycopg2.IntegrityError as e:
+                    pass
+#course_textbooks
+print("Finished textbooks...")
 
 
 # sanity check to see if we missed any data
