@@ -56,9 +56,6 @@ fields = {
         'extra.add_consent': 'add_consent',
         'extra.drop_consent': 'drop_consent',
     },
-    'course_typically_offered': {
-        'extra.typically_offered': 'UNUSED',
-    },
     'ceab_credits': {
         'extra.CEAB.Basic Sci': 'basic_science',
         'extra.CEAB.Comp St': 'complementary_studies',
@@ -70,10 +67,10 @@ fields = {
 # TODO fix switched properties
     'sections': {
         'basic.solus_id': 'class_num', #'solus_id',
+        'basic.class_num': 'solus_id', #'class_num',
         'basic.course': 'course_num__REF__course_id',
         'basic.subject': 'subject_abbr__NOCOLUMN',
         'basic.type': 'type',
-        'basic.class_num': 'solus_id', #'class_num',
         'basic.year': 'year',
         'basic.season': 'season',
         'details.session': 'session',
@@ -110,9 +107,7 @@ fields = {
     },
 }
 
-unused_data = {'subjects': [], 'courses': [], 'sections': [], 'textbooks': []}
 ids = {'subjects': {}, 'courses': {}, 'sections': {}, 'textbooks': {}, 'instructors': {}}
-
 
 conn = psycopg2.connect(dbname="qcumberdb", host="localhost", user="postgres", password="Default1$")
 conn.set_session(autocommit=True)
@@ -130,7 +125,7 @@ for s in yaml_data_files('subjects'):
         obj = yaml.load(contents)
         subject = pop_fields(obj, fields['subjects'])
         obj.pop('_unique', None)
-        # someday in postgres 9.5+ use UPSERT
+        # TODO someday in postgres 9.5+ use UPSERT
         try:
             cur.execute("""
                 INSERT INTO queens.subjects (abbreviation, title)
@@ -142,8 +137,6 @@ for s in yaml_data_files('subjects'):
                 UPDATE queens.subjects
                 SET title = %(title)s
                 WHERE abbreviation = %(abbreviation)s;""", subject)
-        if len(obj.keys()) > 1:
-            unused_data['subjects'].append(obj)
 # put subject ids in a hash for quick reference by abbreviation
 cur.execute("SELECT id, abbreviation FROM queens.subjects")
 ids['subjects'] = {s[1]: s[0] for s in cur.fetchall()}
@@ -156,28 +149,15 @@ columns['section_availability'].append('section_id')
 columns['section_classes'].append('section_id')
 
 queries = {
-    'insert_course': """
-        INSERT INTO queens.courses ({0})
-        VALUES ({1});
-        """.format(
-            ", ".join(columns['courses']),
-            ", ".join(["%({0})s".format(x) for x in columns['courses']])
-        ),
     'update_course': """
         UPDATE queens.courses
         SET {0}
         WHERE subject_id = %(subject_id)s AND number = %(number)s
+        RETURNING id
         """.format(
             ", ".join(["{0} = %({0})s".format(x) for x in columns['courses']])
         ),
 
-    'insert_ceab': """
-        INSERT INTO queens.ceab_credits ({0})
-        VALUES ({1});
-        """.format(
-            ", ".join(columns['ceab_credits']),
-            ", ".join(["%({0})s".format(x) for x in columns['ceab_credits']])
-        ),
     'update_ceab': """
         UPDATE queens.ceab_credits
         SET {0}
@@ -186,30 +166,17 @@ queries = {
             ", ".join(["{0} = %({0})s".format(x) for x in columns['ceab_credits']])
         ),
 
-    'insert_section': """
-        INSERT INTO queens.sections({0})
-        VALUES ({1});
-        """.format(
-            ", ".join(columns['sections']),
-            ", ".join(["%({0})s".format(x) for x in columns['sections'] if x.find('__NOCOLUMN') == -1])
-        ),
     'update_section': """
         UPDATE queens.sections
         SET {0}
         WHERE
             course_id = %(course_id)s
             AND class_num = %(class_num)s
+        RETURNING id
         """.format(
             ", ".join(["{0} = %({0})s".format(x) for x in columns['sections'] if x.find('__NOCOLUMN') == -1])
         ),
 
-    'insert_availability': """
-        INSERT INTO queens.section_availability({0})
-        VALUES ({1});
-        """.format(
-            ", ".join(columns['section_availability']),
-            ", ".join(["%({0})s".format(x) for x in columns['section_availability']])
-        ),
     'update_availability': """
         UPDATE queens.section_availability
         SET {0}
@@ -217,17 +184,8 @@ queries = {
         """.format(
             ", ".join(["{0} = %({0})s".format(x) for x in columns['section_availability']])
         ),
-
-    'insert_class': """
-        INSERT INTO queens.section_classes({0})
-        VALUES ({1})
-        RETURNING id;
-        """.format(
-            ", ".join(columns['section_classes']),
-            ", ".join(["%({0})s".format(x) for x in columns['section_classes']])
-        ),
 }
-def insert(table_name, extra_cols=[], return_id=False):
+def insert_query(table_name, extra_cols=[], return_id=False):
     cols = [x for x in columns[table_name] if x.find('__NOCOLUMN') == -1]
     cols.extend(extra_cols)
     kwargs = {
@@ -256,7 +214,7 @@ for c in yaml_data_files('courses'):
         # write course
         try:
             try:
-                cur.execute(queries['insert_course'], course)
+                cur.execute(insert_query('courses', return_id=True), course)
             except psycopg2.IntegrityError as e:
                 if e.pgerror.find('uk_qcourses_id') == -1:
                     raise e
@@ -266,13 +224,8 @@ for c in yaml_data_files('courses'):
             raise e
 
         # after insert, get course id to be able to write other course related tables
-        cur.execute("""SELECT id FROM queens.courses
-            WHERE subject_id = %(subject_id)s AND number = %(number)s""", course)
         course_id = cur.fetchone()[0]
         ids['courses']["{0} {1}".format(course['subject_abbr'],course['number'])] = course_id
-
-        # This data is unused, it's derived from what's actually offered instead
-        pop_fields(obj, fields['course_typically_offered'])
 
         # components are things like Lecture, Tutorial, Lab
         cur.execute("""
@@ -294,12 +247,10 @@ for c in yaml_data_files('courses'):
         ceab = pop_fields(obj, fields['ceab_credits'])
         ceab['course_id'] = course_id
         try:
-            cur.execute(queries['insert_ceab'], ceab)
+            cur.execute(insert_query('ceab_credits'), ceab)
         except psycopg2.IntegrityError:
             cur.execute(queries['update_ceab'], ceab)
 
-        if len(obj.keys()) > 1:
-            unused_data['courses'].append(obj)
 print("Finished courses...")
 
 cur.execute("SELECT abbreviation, number, c.id FROM queens.subjects s JOIN queens.courses c ON (s.id = c.subject_id)")
@@ -320,15 +271,12 @@ for s in yaml_data_files('sections'):
             UPDATE queens.sections SET solus_id = null
             WHERE solus_id = %(solus_id)s""", section)
         try:
-            cur.execute(queries['insert_section'], section)
+            cur.execute(insert_query('sections', return_id=True), section)
         except psycopg2.IntegrityError as e:
             if e.pgerror.find('uk_qsections_id') == -1:
                 raise e
             cur.execute(queries['update_section'], section)
 
-        # get the section id for referential tables
-        cur.execute("""SELECT id FROM queens.sections
-            WHERE course_id = %(course_id)s AND class_num = %(class_num)s""", section)
         try:
             section_id = cur.fetchone()[0]
         except Exception as e:
@@ -339,7 +287,7 @@ for s in yaml_data_files('sections'):
         available = pop_fields(obj, fields['section_availability'])
         available['section_id'] = section_id
         try:
-            cur.execute(queries['insert_availability'], available)
+            cur.execute(insert_query('section_availability'), available)
         except psycopg2.IntegrityError:
             cur.execute(queries['update_availability'], available)
 
@@ -353,7 +301,7 @@ for s in yaml_data_files('sections'):
             if clz['day_of_week'] is not None:
                 clz['day_of_week'] = ISO_WEEK_DAYS[clz['day_of_week']]
             try:
-                cur.execute(queries['insert_class'], clz)
+                cur.execute(insert_query('section_classes', return_id=True), clz)
             except psycopg2.IntegrityError as e:
                 print(section)
                 print(clz)
@@ -382,8 +330,6 @@ for s in yaml_data_files('sections'):
         if len(obj['classes']) == 0:
             obj.pop('classes', None)
 
-        if len(obj.keys()) > 1:
-            unused_data['sections'].append(obj)
 print("Finished sections...")
 
 
@@ -406,7 +352,7 @@ for s in yaml_data_files('textbooks'):
         if textbook['isbn_10'] is not None and len(textbook['isbn_10']) > 10:
             textbook['isbn_10'] = None
         try:
-            cur.execute(insert('textbooks', [], True), textbook)
+            cur.execute(insert_query('textbooks', return_id=True), textbook)
         except psycopg2.DataError as e:
             print(textbook)
             raise e
@@ -416,7 +362,7 @@ for s in yaml_data_files('textbooks'):
         t_bkstr['textbook_id'] = t_id
         if t_bkstr['price'] is not None:
             t_bkstr['price'] = t_bkstr['price'].replace('$', '')
-        cur.execute(insert('textbooks_bookstore', ['textbook_id']), t_bkstr)
+        cur.execute(insert_query('textbooks_bookstore', extra_cols=['textbook_id']), t_bkstr)
 
         for c in obj['courses']:
             if c in ids['courses']:
@@ -427,31 +373,7 @@ for s in yaml_data_files('textbooks'):
                         """, {'t_id': t_id, 'c_id': ids['courses'][c]})
                 except psycopg2.IntegrityError as e:
                     pass
-#course_textbooks
 print("Finished textbooks...")
-
-
-# sanity check to see if we missed any data
-def report_unused(obj):
-    try:
-        obj.keys()
-    except:
-        return obj
-    if len(obj.keys()) == 0:
-        return None
-    else:
-        obj = {key: report_unused(obj[key]) for key in obj.keys()}
-        obj = {key: obj[key] for key in obj.keys() if obj[key] is not None}
-        if len(obj.keys()) == 0:
-            return None
-        else:
-            return obj
-
-for category in unused_data.keys():
-    unused_data[category] = [report_unused(x) for x in unused_data[category]]
-    unused_data[category] = [x for x in unused_data[category] if x is not None]
-print(report_unused(unused_data))
-
 
 cur.close()
 conn.close()
