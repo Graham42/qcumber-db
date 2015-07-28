@@ -1,3 +1,3 @@
-CREATE DATABASE qcumberdb;
+CREATE DATABASE qcumberdb ENCODING = 'UTF-8';
 CREATE USER qcumber;
 GRANT ALL PRIVILEGES ON DATABASE qcumberdb TO qcumber;
